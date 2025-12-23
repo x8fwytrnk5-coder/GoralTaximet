@@ -3,56 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Taxi – kalkulačka & taxameter</title>
-
+<title>Taxi App – Kompletná verzia</title>
 <style>
-body {
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #f2f2f2;
-  margin: 0;
-  padding: 15px;
-}
-
-h1 {
-  text-align: center;
-}
-
-.card {
-  background: white;
-  padding: 15px;
-  border-radius: 12px;
-  margin-bottom: 15px;
-}
-
-label {
-  font-weight: 600;
-  display: block;
-  margin-top: 10px;
-}
-
-input, select {
-  width: 100%;
-  padding: 10px;
-  font-size: 16px;
-  margin-top: 5px;
-}
-
-.result {
-  font-size: 18px;
-  margin-top: 10px;
-  font-weight: bold;
-}
-
-.green { color: green; }
-.red { color: red; }
-.hidden { display: none; }
+body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background:#f2f2f2; margin:0; padding:15px; }
+h1 { text-align:center; }
+.card { background:white; padding:15px; border-radius:12px; margin-bottom:15px; }
+label { font-weight:600; display:block; margin-top:10px; }
+input, select { width:100%; padding:10px; font-size:16px; margin-top:5px; }
+.result { font-size:18px; margin-top:10px; font-weight:bold; }
+.green { color:green; }
+.red { color:red; }
+.hidden { display:none; }
 </style>
 </head>
-
 <body>
 
-<h1>🚕 Taxi aplikácia</h1>
+<h1>🚕 Taxi aplikácia – Kompletná verzia</h1>
 
 <div class="card">
   <label>Režim aplikácie</label>
@@ -64,21 +30,24 @@ input, select {
 
 <!-- KALKULAČKA NÁKLADOV -->
 <div id="costs" class="card">
-
   <label>Sadzba za 1 km (náklady)</label>
   <input type="number" id="costRate" value="0.31" step="0.01">
-
   <label>Najazdené kilometre</label>
   <input type="number" id="costKm" value="0" step="0.1">
-
   <label>Cena jazdy (zadá vodič)</label>
   <input type="number" id="ridePrice" value="0" step="0.1">
-
-  <div class="result" id="costResult">Náklady: 0 €</div>
 </div>
 
 <!-- TAXAMETER -->
 <div id="taximeter" class="card hidden">
+  <label>Poloha vozidla (GPS, Lat,Lon)</label>
+  <input type="text" id="vehiclePos" placeholder="Načítanie polohy..." readonly>
+
+  <label>Adresa nástupu klienta (Lat,Lon)</label>
+  <input type="text" id="startAddress" placeholder="napr. 48.1486,17.1077">
+
+  <label>Adresa výstupu klienta (Lat,Lon)</label>
+  <input type="text" id="endAddress" placeholder="napr. 48.1480,17.1100">
 
   <label>Sadzba pristavenie</label>
   <input type="number" id="startRate" value="0.40" step="0.01">
@@ -86,59 +55,111 @@ input, select {
   <label>Sadzba za 1 km</label>
   <input type="number" id="kmRate" value="0.85" step="0.01">
 
-  <label>Km k nástupu klienta</label>
-  <input type="number" id="toClientKm" value="0" step="0.1">
-
-  <label>Km s klientom</label>
-  <input type="number" id="withClientKm" value="0" step="0.1">
-
   <label>Príplatky</label>
   <input type="number" id="extras" value="0" step="0.1">
-
-  <div class="result" id="taxiResult">Cena jazdy: 0 €</div>
 </div>
 
+<div id="results" class="card result">Výsledok sa zobrazí tu</div>
+
 <script>
+// prepínač režimov
 const mode = document.getElementById("mode");
-const costs = document.getElementById("costs");
-const taximeter = document.getElementById("taximeter");
+const costsDiv = document.getElementById("costs");
+const taximeterDiv = document.getElementById("taximeter");
 
 mode.onchange = () => {
-  costs.classList.toggle("hidden", mode.value !== "costs");
-  taximeter.classList.toggle("hidden", mode.value !== "taximeter");
+  costsDiv.classList.toggle("hidden", mode.value !== "costs");
+  taximeterDiv.classList.toggle("hidden", mode.value !== "taximeter");
+  calculateAll();
 };
 
-document.querySelectorAll("input").forEach(i => {
-  i.oninput = calculate;
-});
+// pripojenie vstupov
+document.querySelectorAll("input").forEach(i => i.oninput = calculateAll);
 
-function calculate() {
-  // Náklady
-  const rate = +costRate.value;
-  const km = +costKm.value;
-  const price = +ridePrice.value;
+// inicializácia GPS
+function updateGPS() {
+  const vehicleInput = document.getElementById("vehiclePos");
+  if(!navigator.geolocation){
+    vehicleInput.value = "GPS nie je podporované";
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const lat = pos.coords.latitude.toFixed(6);
+      const lon = pos.coords.longitude.toFixed(6);
+      vehicleInput.value = `${lat},${lon}`;
+      calculateAll();
+    },
+    err => { vehicleInput.value = "GPS zlyhalo, zadaj ručne"; }
+  );
+}
+updateGPS();
+
+// hlavná funkcia
+async function calculateAll() {
+  if(mode.value === "costs"){
+    calculateCosts();
+  } else {
+    await calculateTaximeterOSRM();
+  }
+}
+
+// kalkulačka nákladov
+function calculateCosts(){
+  const rate = +document.getElementById("costRate").value;
+  const km = +document.getElementById("costKm").value;
+  const price = +document.getElementById("ridePrice").value;
 
   const costsValue = rate * km;
-  const profit = price - costsValue;
+  const provizia = price * 0.25;
+  const dph = provizia * 0.23;
+  const totalCosts = costsValue + provizia + dph;
+  const profit = price - totalCosts;
 
-  costResult.innerText = `Náklady: ${costsValue.toFixed(2)} € | Výsledok: ${profit.toFixed(2)} €`;
-  costResult.className = "result " + (profit >= 0 ? "green" : "red");
-
-  // Taxameter
-  const start = +startRate.value;
-  const kmRateVal = +kmRate.value;
-  const toClient = +toClientKm.value;
-  const withClient = +withClientKm.value;
-  const extra = +extras.value;
-
-  const taxiPrice =
-    (toClient * start) +
-    (withClient * kmRateVal) +
-    extra;
-
-  taxiResult.innerText = `Cena jazdy: ${taxiPrice.toFixed(2)} €`;
+  const result = document.getElementById("results");
+  result.innerText = `Náklady: ${costsValue.toFixed(2)} € | Provízia: ${provizia.toFixed(2)} € | DPH: ${dph.toFixed(2)} € | Celkové náklady: ${totalCosts.toFixed(2)} € | Zisk: ${profit.toFixed(2)} €`;
+  result.className = "result " + (profit>=0?"green":"red");
 }
-calculate();
+
+// OSRM vzdialenosť
+async function getDistanceOSRM(startLat, startLon, endLat, endLon){
+  const url = `https://router.project-osrm.org/route/v1/driving/${startLon},${startLat};${endLon},${endLat}?overview=false`;
+  try{
+    const res = await fetch(url);
+    const data = await res.json();
+    if(data.routes && data.routes.length>0) return data.routes[0].distance/1000;
+    return 0;
+  } catch(e){
+    console.error("OSRM error", e);
+    return 0;
+  }
+}
+
+// taxameter s OSRM
+async function calculateTaximeterOSRM(){
+  const vehicle = document.getElementById("vehiclePos").value.split(",");
+  const start = document.getElementById("startAddress").value.split(",");
+  const end = document.getElementById("endAddress").value.split(",");
+
+  if(vehicle.length<2 || start.length<2 || end.length<2) return;
+
+  const kmToClient = await getDistanceOSRM(+vehicle[0], +vehicle[1], +start[0], +start[1]);
+  const kmWithClient = await getDistanceOSRM(+start[0], +start[1], +end[0], +end[1]);
+
+  const startRate = +document.getElementById("startRate").value;
+  const kmRate = +document.getElementById("kmRate").value;
+  const extras = +document.getElementById("extras").value;
+
+  const ridePrice = kmToClient*startRate + kmWithClient*kmRate + extras;
+  const provizia = ridePrice*0.25;
+  const dph = provizia*0.23;
+  const totalCosts = provizia + dph;
+  const profit = ridePrice - totalCosts;
+
+  const result = document.getElementById("results");
+  result.innerText = `Cena jazdy: ${ridePrice.toFixed(2)} € | Provízia: ${provizia.toFixed(2)} € | DPH: ${dph.toFixed(2)} € | Zisk: ${profit.toFixed(2)} €`;
+  result.className = "result " + (profit>=0?"green":"red");
+}
 </script>
 
 </body>
